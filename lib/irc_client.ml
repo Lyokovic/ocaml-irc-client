@@ -119,7 +119,7 @@ module Make(Io: Irc_transport.IO) = struct
   let log_ : (string -> unit Io.t) ref = ref (fun _ -> Io.return ())
   let set_log f = log_ := f
 
-  let log s = !log_ (Printf.sprintf "[%.2f] %s" (Sys.time()) s)
+  let log s = !log_ (Printf.sprintf "[%.2f] %s" (Unix.gettimeofday ()) s)
   let logf s = Printf.ksprintf log s
 
   open Io
@@ -270,21 +270,21 @@ module Make(Io: Irc_transport.IO) = struct
   let active_ping_thread keepalive state ~connection =
     let rec loop () =
       assert (keepalive.mode = `Active);
-      let now = Sys.time() in
+      let now = Unix.gettimeofday () in
       let time_til_ping =
-        state.last_active_ping +. float keepalive.timeout -. now
+        state.last_active_ping +. float keepalive.timeout -. now -. 10.
       in
       if state.finished then (
         Io.return ()
       ) else (
         (* send "ping" if active mode and it's been long enough *)
-        if time_til_ping < 0. then (
+        (if time_til_ping < 0. then (
           state.last_active_ping <- now;
           log "send ping to server..." >>= fun () ->
           send_ping ~connection ~message:"ping"
         ) else (
           Io.return ()
-        )
+        ))
           >>= fun () ->
           (* sleep until the due date, then check again *)
           Io.sleep (int_of_float time_til_ping + 1) >>= fun () ->
@@ -296,8 +296,8 @@ module Make(Io: Irc_transport.IO) = struct
   let listen ?(keepalive=default_keepalive) ~connection ~callback () =
     (* main loop *)
     let rec listen_rec state =
-      let now = Sys.time() in
-      let timeout = state.last_seen +. float keepalive.timeout -. Sys.time () in
+      let now = Unix.gettimeofday () in
+      let timeout = state.last_seen +. float keepalive.timeout -. now in
       next_line_ ~timeout:(int_of_float (ceil timeout)) ~connection
       >>= function
       | Timeout ->
@@ -307,17 +307,17 @@ module Make(Io: Irc_transport.IO) = struct
         state.finished <- true;
         log "connection closed"
       | Read line ->
+        (* update "last_seen" field *)
+        let now = Unix.gettimeofday () in
+        state.last_seen <- max now state.last_seen;
         begin match M.parse line with
           | Result.Ok {M.command = M.PING message; _} ->
-            (* update "last_seen" field *)
-            state.last_seen <- max now state.last_seen;
             (* Handle pings without calling the callback. *)
             log "reply pong to server" >>= fun () ->
             send_pong ~connection ~message
           | Result.Ok {M.command = M.PONG _; _} ->
-            (* active response from server, update "last_seen" field *)
-            state.last_seen <- max now state.last_seen;
-            Io.return ()
+            (* active response from server *)
+            log "received pong"
           | result -> callback connection result
         end
         >>= fun () ->
@@ -326,8 +326,8 @@ module Make(Io: Irc_transport.IO) = struct
         else listen_rec state
     in
     let state = {
-      last_seen = Sys.time();
-      last_active_ping = Sys.time();
+      last_seen = Unix.gettimeofday ();
+      last_active_ping = Unix.gettimeofday ();
       finished = false;
     } in
     (* connect, serve, etc. *)

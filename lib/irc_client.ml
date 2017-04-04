@@ -155,7 +155,7 @@ module Make(Io: Irc_transport.IO) = struct
     send ~connection (M.ping message)
 
   let send_pong ~connection ~message =
-    send ~connection (M.pong message)
+    send ~connection (M.pong ~middle:"foo" ~trailer:message)
 
   let send_privmsg ~connection ~target ~message =
     send ~connection (M.privmsg ~target message)

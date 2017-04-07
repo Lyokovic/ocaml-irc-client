@@ -133,7 +133,11 @@ module Make(Io: Irc_transport.IO) = struct
           ~length:(length - chars_written))
 
   let send_raw ~connection ~data =
-    let formatted_data = Bytes.unsafe_of_string (Printf.sprintf "%s\r\n" data) in
+    (* TODO: make a list of data to send and send recursively. *)
+    let string_to_send = String.sub data 0 (min (String.length data) 510) in
+    let formatted_data =
+        Bytes.unsafe_of_string (Printf.sprintf "%s\r\n" string_to_send)
+    in
     let length = Bytes.length formatted_data in
     really_write ~connection ~data:formatted_data ~offset:0 ~length
 
